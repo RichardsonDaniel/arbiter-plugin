@@ -11,7 +11,13 @@ import { join, isAbsolute } from 'node:path'
 
 const OFF = /^(off|0|false|no)$/i.test(process.env.ARBITER_EDIT_GUARD ?? '')
 const LAYA = process.env.ARBITER_LAYA_URL ?? process.env.LAYA_URL ?? ''
-const CLEAR = { route_guarded: 0.95, policy_scope: 0.98 }
+// Per-model clearing thresholds (product/packages/decide/src/index.ts); an unknown model never clears.
+const CLEAR_BY_MODEL = { 'arbiter-v4': { route_guarded: 0.97, policy_scope: 0.98 }, 'arbiter-v5': { route_guarded: 0.9, policy_scope: 0.93 } }
+// Probability at or above which a model's before-guarded, after-open judgement asks (per model, measured with
+// corpus/decisions/eval_edit_guard.py). ARBITER_ASK_P overrides it for measurement.
+const ASK_BY_MODEL = { 'arbiter-v4': 0.8, 'arbiter-v5': 0.95 }
+const askP = (m) => Number(process.env.ARBITER_ASK_P ?? ASK_BY_MODEL[m?.model] ?? 0.8)
+const clear = (m, q) => CLEAR_BY_MODEL[m?.model]?.[q] ?? 1.01
 
 const CODE = /\.(ts|tsx|js|jsx|mjs|cjs|py|rb|php|go|sql|svelte|vue|astro)$/i
 const ENVFILE = /(^|\/)\.env(\.[\w-]+)?$/
@@ -63,8 +69,10 @@ async function ask(state, qid, question) {
     const ctl = AbortSignal.timeout(1500)
     const res = await fetch(LAYA.replace(/\/$/, '') + '/v1/systemone', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ state: state.slice(0, 6000), questions: { [qid]: question } }), signal: ctl })
     if (!res.ok) return null
-    const a = (await res.json()).answers?.[qid]
-    return a && typeof a.choice === 'string' ? { choice: a.choice, score: Number(a.score ?? a.confidence ?? 0), p: Number(a.answer_confidence ?? a.probabilities?.[a.choice] ?? 0) } : null
+    const body = await res.json()
+    const a = body.answers?.[qid]
+    const model = String(body.model ?? '')
+    return a && typeof a.choice === 'string' ? { model, choice: a.choice, score: Number(a.score ?? a.confidence ?? 0), p: Number(a.answer_confidence ?? a.probabilities?.[a.choice] ?? 0) } : null
   } catch {
     return null
   }
@@ -113,7 +121,7 @@ process.stdin.on('end', async () => {
     const fresh = (after.match(POLICY) ?? []).filter((p) => !before.includes(p))
     for (const p of fresh) {
       const m = questions ? await ask(p, 'policy_scope', questions['policy-owner-scoped']) : null
-      if (m && m.choice !== 'open' && m.score >= CLEAR.policy_scope) continue
+      if (m && m.choice !== 'open' && m.score >= clear(m, 'policy_scope')) continue
       if ((m && m.choice === 'open') || OPEN_COND.test(p)) decide(`this adds a database policy that lets everyone (or every signed-in user) reach the rows: ${p.replace(/\s+/g, ' ').slice(0, 140)}`)
     }
     if (/grant\s+[\w\s,]*\bon\b[\s\S]*?\bto\s+anon\b/i.test(added)) decide('this grants the anonymous role access to a table, so visitors who are not signed in can use it.')
@@ -127,13 +135,13 @@ process.stdin.on('end', async () => {
     if (before && q && LAYA) {
       const [mb, ma] = await Promise.all([ask(before, 'route_guarded', q), ask(after, 'route_guarded', q)])
       if (mb && ma) {
-        if (mb.choice === 'guarded' && mb.p >= 0.8 && ma.choice === 'unguarded' && ma.p >= 0.8) decide(`after this edit, ${where} no longer stops callers who are not signed in (or lack the required secret) before it reads or changes data.`)
+        if (mb.choice === 'guarded' && mb.p >= askP(mb) && ma.choice === 'unguarded' && ma.p >= askP(ma)) decide(`after this edit, ${where} no longer stops callers who are not signed in (or lack the required secret) before it reads or changes data.`)
         if (!(guarded(before) && !guarded(after))) process.exit(0)
       }
     }
     if (before && guarded(before) && !guarded(after)) {
       const m = q ? await ask(after, 'route_guarded', q) : null
-      if (m && m.choice === 'guarded' && m.score >= CLEAR.route_guarded) process.exit(0)
+      if (m && m.choice === 'guarded' && m.score >= clear(m, 'route_guarded')) process.exit(0)
       decide(`this edit removes a sign-in or permission check from ${where}, which reads or changes data. Without it, anyone could call this route.`)
     }
     // The rules still see a check, but it may now run too late or never reject. Only the model can judge that,
@@ -142,7 +150,7 @@ process.stdin.on('end', async () => {
     if (before && guarded(before) && q) {
       // Asking is the safe direction, so this uses the answer's probability rather than the stricter calibrated confidence.
       const m = await ask(after, 'route_guarded', q)
-      if (m && m.choice === 'unguarded' && m.p >= 0.8) decide(`after this edit, the sign-in check in ${where} no longer protects the data: it runs too late, or never turns the caller away.`)
+      if (m && m.choice === 'unguarded' && m.p >= askP(m)) decide(`after this edit, the sign-in check in ${where} no longer protects the data: it runs too late, or never turns the caller away.`)
     }
   }
   process.exit(0)
