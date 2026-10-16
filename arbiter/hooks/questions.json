@@ -1,0 +1,28 @@
+{
+  "route-guarded": {
+    "type": "choice",
+    "instructions": "Read this route handler. Does it stop a caller who is not signed in (or who lacks the required secret) before it reads or changes data?",
+    "criteria": {
+      "guarded": "yes: the handler, a decorator, or middleware it runs under checks the session, token or secret and rejects the caller otherwise",
+      "unguarded": "no: anyone can call it and reach the data, even if the code reads a session or header without enforcing it"
+    }
+  },
+  "policy-owner-scoped": {
+    "type": "choice",
+    "instructions": "Read this database row-level security policy. Who can reach the rows it covers?",
+    "criteria": {
+      "owner": "only the user who owns each row (the condition compares a user id column to the signed-in user)",
+      "open": "everyone, or every signed-in user, or a condition that every row meets or that a user can set for themselves, on data about people or their activity (profiles, orders, holdings, messages, RSVPs, uploads)",
+      "other": "a real narrower rule that is not row ownership (team or organisation membership, an admin role from a trusted claim), or reading rows that are public by design: published content, or reference and catalogue data with no personal data (currencies, plan limits, card or product definitions), or images meant to be shown publicly such as avatars or product photos"
+    }
+  },
+  "key-live": {
+    "type": "choice",
+    "instructions": "Read this configuration or code. Is the secret value a real live credential, a real test-mode credential, or a placeholder or documentation example?",
+    "criteria": {
+      "live": "a real credential that works against production services",
+      "test": "a real credential for a test or sandbox mode that cannot move money or reach production data",
+      "placeholder": "not a working credential: a template value, an example from documentation, a local development default, or obviously fake"
+    }
+  }
+}
