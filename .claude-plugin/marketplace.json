@@ -1,0 +1,14 @@
+{
+  "name": "arbiter",
+  "owner": { "name": "Arbiter" },
+  "metadata": { "description": "Security checks and plain-language reports for apps built with AI." },
+  "plugins": [
+    {
+      "name": "arbiter",
+      "source": "./arbiter",
+      "description": "Ask your coding tool \"is this safe to ship?\": scans for leaked keys, open routes, database rules, dependencies and settings, with a fix for each finding. Includes guard hooks that stop destructive database commands.",
+      "version": "0.1.0",
+      "category": "security"
+    }
+  ]
+}

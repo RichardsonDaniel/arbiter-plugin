@@ -1,0 +1,7 @@
+{
+  "name": "arbiter",
+  "version": "0.1.0",
+  "description": "Security checks and plain-language reports for apps built with AI, plus guard hooks against destructive database commands.",
+  "author": { "name": "Arbiter" },
+  "keywords": ["security", "supabase", "secrets", "vibe-coding"]
+}

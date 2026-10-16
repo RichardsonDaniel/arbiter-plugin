@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "arbiter": {
+      "type": "http",
+      "url": "${ARBITER_MCP_URL:-http://localhost:8787/mcp}"
+    }
+  }
+}
