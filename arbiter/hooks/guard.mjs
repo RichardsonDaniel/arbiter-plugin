@@ -109,7 +109,8 @@ function outgoingText(cwd) {
   const upstream = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], cwd).trim()
   const range = upstream ? `${upstream}..HEAD` : 'origin/HEAD..HEAD'
   text += git(['log', '-p', '--no-color', '--format=%H', range], cwd)
-  return text
+  // Only added lines are new; context and removed lines are already published (or being taken out).
+  return text.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++')).join('\n')
 }
 
 let input = ''
