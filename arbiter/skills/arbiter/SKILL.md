@@ -18,6 +18,8 @@ Arbiter scans an app the way an attacker would look at it: leaked keys in code a
 1. `scan_project` with the current folder (local server) or the repository URL or app name (hosted server). It returns within the call for small apps; if it says the scan is still running, call `get_scan` with the id in about thirty seconds. Do not start a second scan while one is running.
 2. Read the report in severity order: "Fix now" first. Call `get_finding` with a finding id for the full text, steps and prompt.
 3. Summarise for the user in plain English: what is exposed, what could happen, what to do first. Keep the report's wording about confidence: "Confirmed" was reproduced, "Likely" was flagged and needs a look.
+4. Read the "Not checked" lines. A clean result covers only the inputs the scan was given. If the live site or the database was not checked, say so plainly and ask for the deployed URL or the Supabase connection before calling the app safe to ship. The report names the project or URL it found in the code when it can.
+5. Give the person the full report link when the result includes one; it has every fix step laid out.
 
 ## How to apply a fix
 
