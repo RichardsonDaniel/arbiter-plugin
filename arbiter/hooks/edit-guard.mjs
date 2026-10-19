@@ -5,7 +5,7 @@
 // Set ARBITER_EDIT_GUARD=off to switch it off.
 import { readFileSync, existsSync } from 'node:fs'
 import { join, isAbsolute } from 'node:path'
-import { OFF, watched, judgeEdit, readHookInput } from './edit-rules.mjs'
+import { OFF, watched, judgeEdit, modelSkipped, readHookInput } from './edit-rules.mjs'
 
 function apply(input, before) {
   const t = input.tool_input ?? {}
@@ -27,5 +27,6 @@ const abs = isAbsolute(file) ? file : join(input.cwd ?? process.cwd(), file)
 let before = ''
 try { if (existsSync(abs)) before = readFileSync(abs, 'utf8') } catch { process.exit(0) }
 const reason = await judgeEdit(abs, before, apply(input, before))
+if (modelSkipped()) process.stderr.write(`Arbiter edit guard: the decision model ran out of time on ${modelSkipped()} question(s), so the rules judged those alone.\n`)
 if (reason) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: `Arbiter: ${reason} Allow this edit? (Set ARBITER_EDIT_GUARD=off to stop these checks.)` } }))
 process.exit(0)

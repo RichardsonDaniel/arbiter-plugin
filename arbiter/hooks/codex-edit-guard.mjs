@@ -1,12 +1,13 @@
 // Arbiter edit guard for Codex: a PreToolUse hook on apply_patch, the tool Codex edits files with. It reads the
 // patch, works out each file's text before and after, and runs the same judgement as the Claude Code hook
 // (edit-rules.mjs). Codex hooks cannot ask the person directly, so a risky edit is denied with the reason and a
-// code; the agent relays it, and the person types `arbiter allow <code>` to let the retried edit through
-// (codex-allow.mjs records that). Set ARBITER_EDIT_GUARD=off to switch it off.
-import { readFileSync, existsSync } from 'node:fs'
+// code; the agent relays it, and the person sends a message of only `arbiter allow <code>` to let the retried edit through
+// once (codex-allow.mjs records that). Deleting or renaming away auth middleware is judged too. ARBITER_EDIT_GUARD=off switches it off.
+import { readFileSync, existsSync, appendFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, isAbsolute, relative } from 'node:path'
-import { OFF, watched, judgeEdit, readHookInput } from './edit-rules.mjs'
-import { approvalCode, isApproved } from './codex-approvals.mjs'
+import { OFF, watched, judgeEdit, judgeRemoval, modelSkipped, readHookInput } from './edit-rules.mjs'
+import { approvalCode, isApproved, consume } from './codex-approvals.mjs'
 
 /** Splits an apply_patch body into file operations: { kind: add|update|delete, path, moveTo, lines }. */
 function parsePatch(text) {
@@ -73,29 +74,52 @@ function applyUpdate(before, patchLines) {
   return lines.join('\n')
 }
 
+function debug(msg) {
+  if (!process.env.ARBITER_DEBUG) return
+  try { appendFileSync(join(process.env.ARBITER_STATE_DIR ?? join(homedir(), '.arbiter'), 'debug.log'), `${new Date().toISOString()} codex-edit-guard ${msg}\n`) } catch {}
+}
+
 const input = await readHookInput()
 if (OFF || !input) process.exit(0)
 const patch = String(input.tool_input?.command ?? input.tool_input?.input ?? input.tool_input?.patch ?? '')
 const cwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : process.cwd()
 const session = String(input.session_id ?? '')
-const paused = []
-for (const op of parsePatch(patch)) {
-  if (op.kind === 'delete') continue
-  const target = op.moveTo ?? op.path
-  if (!watched(target)) continue
-  const abs = (p) => (isAbsolute(p) ? p : join(cwd, p))
-  let before = ''
-  try { if (op.kind === 'update' && existsSync(abs(op.path))) before = readFileSync(abs(op.path), 'utf8') } catch { continue }
-  const after = op.kind === 'add' ? op.lines.map((l) => (l.startsWith('+') ? l.slice(1) : l)).join('\n') : applyUpdate(before, op.lines)
-  const reason = await judgeEdit(abs(target), before, after)
-  if (!reason) continue
-  const code = approvalCode(session, abs(target), reason)
-  if (!isApproved(session, code)) paused.push({ file: relative(cwd, abs(target)) || target, reason, code })
+const abs = (p) => (isAbsolute(p) ? p : join(cwd, p))
+const read = (p) => { try { return existsSync(abs(p)) ? readFileSync(abs(p), 'utf8') : '' } catch { return '' } }
+const ops = parsePatch(patch)
+if (!ops.length) {
+  // An edit this guard cannot read is let through (a hook cannot do better than Codex's own patch parser), but not silently.
+  process.stderr.write('Arbiter edit guard: could not read any file operations in this apply_patch call, so it was not checked.\n')
+  debug(`no operations parsed; tool_input=${JSON.stringify(input.tool_input ?? null).slice(0, 4000)}`)
+  process.exit(0)
 }
-if (paused.length) {
-  const what = paused.map((p) => `${p.file}: ${p.reason} (code ${p.code})`).join(' ')
-  const codes = paused.map((p) => `arbiter allow ${p.code}`).join(', ')
-  const reason = `Arbiter paused this edit. ${what} Stop and ask the person whether to go ahead, explaining the risk in plain words. Do not make this change another way (shell commands, a different patch) to get around the check. If they want it, they type \`${codes}\` themselves, then you retry the same edit. (Set ARBITER_EDIT_GUARD=off to stop these checks.)`
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }))
+const hits = []
+for (const op of ops) {
+  let file = op.path
+  let reason = null
+  let after = ''
+  if (op.kind === 'delete') {
+    if (!watched(op.path)) continue
+    reason = judgeRemoval(abs(op.path), read(op.path))
+  } else {
+    file = op.moveTo ?? op.path
+    if (!watched(file) && !watched(op.path)) continue
+    const before = op.kind === 'update' ? read(op.path) : ''
+    after = op.kind === 'add' ? op.lines.map((l) => (l.startsWith('+') ? l.slice(1) : l)).join('\n') : applyUpdate(before, op.lines)
+    if (op.moveTo) reason = judgeRemoval(abs(op.path), before, abs(op.moveTo))
+    if (!reason && watched(file)) reason = await judgeEdit(abs(file), before, after)
+  }
+  if (reason) hits.push({ file: relative(cwd, abs(file)) || file, reason, code: approvalCode(session, abs(file), reason, after) })
 }
+if (modelSkipped()) process.stderr.write(`Arbiter edit guard: the decision model ran out of time on ${modelSkipped()} question(s), so the rules judged those alone.\n`)
+const paused = hits.filter((h) => !isApproved(session, h.code))
+if (!paused.length) {
+  // Every finding in this edit was allowed by the person: the edit goes ahead and uses those approvals up.
+  if (hits.length) { try { consume(session, hits.map((h) => h.code)) } catch {} }
+  process.exit(0)
+}
+const what = paused.map((p) => `${p.file}: ${p.reason} (code ${p.code})`).join(' ')
+const codes = paused.map((p) => `arbiter allow ${p.code}`).join(', ')
+const reason = `Arbiter paused this edit. ${what} Stop and ask the person whether to go ahead, explaining the risk in plain words. Do not make this change another way (shell commands, a different patch) to get around the check. If they want it, they send a message containing only \`${codes}\`, typed themselves; then you retry exactly the same edit. Each allow covers that one edit once. (Set ARBITER_EDIT_GUARD=off to stop these checks.)`
+process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }))
 process.exit(0)

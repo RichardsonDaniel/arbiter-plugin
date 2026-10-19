@@ -49,10 +49,19 @@ const PUBLIC_ENV = /^(NEXT_PUBLIC_|VITE_|PUBLIC_|EXPO_PUBLIC_|REACT_APP_|NUXT_PU
 const POLICY = /create\s+policy[\s\S]*?;/gi
 const OPEN_COND = /using\s*\(\s*true\s*\)|with\s+check\s*\(\s*true\s*\)|auth\.role\(\)\s*=\s*'authenticated'|auth\.uid\(\)\s+is\s+not\s+null|user_metadata/i
 
+// The whole hook must finish inside the tool's hook timeout (5 seconds in both plugins). Model questions stop
+// once the budget is spent and the rules judge alone; modelSkipped() lets the entry point say so.
+const BUDGET_MS = Number(process.env.ARBITER_HOOK_BUDGET_MS ?? 4000)
+const deadline = Date.now() + BUDGET_MS
+let skipped = 0
+export const modelSkipped = () => skipped
+
 async function ask(state, qid, question) {
   if (!LAYA) return null
+  const left = deadline - Date.now()
+  if (left < 200) { skipped++; return null }
   try {
-    const ctl = AbortSignal.timeout(1500)
+    const ctl = AbortSignal.timeout(Math.min(1500, left - 100))
     const res = await fetch(LAYA.replace(/\/$/, '') + '/v1/systemone', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ state: state.slice(0, 6000), questions: { [qid]: question } }), signal: ctl })
     if (!res.ok) return null
     const body = await res.json()
@@ -135,6 +144,22 @@ export async function judgeEdit(path, before, after) {
     }
   }
   return null
+}
+
+// Next.js middleware (proxy.ts from Next 16) and auth middleware modules guard many routes at once.
+const MIDDLEWARE = /(^|\/)((middleware|proxy)\.[jt]s|middlewares?\/[^/]*auth[^/]*\.[jt]s)$/i
+
+/**
+ * The reason to ask before a file is deleted or renamed away, or null. Removing a route file removes the route,
+ * which is not a risk; removing middleware that checks the caller leaves every route it covered open.
+ */
+export function judgeRemoval(path, before, newPath = null) {
+  if (OFF) return null
+  const rel = path.replace(/\\/g, '/')
+  if (!MIDDLEWARE.test(rel) || (newPath && MIDDLEWARE.test(newPath.replace(/\\/g, '/')))) return null
+  if (!(guarded(before) || CHECK.test(before))) return null
+  const where = rel.split('/').slice(-2).join('/')
+  return `this ${newPath ? 'renames' : 'deletes'} ${where}, which checks who is calling before requests reach the app's routes. Without it, those routes may be open to anyone.`
 }
 
 /** Reads a hook's JSON input from stdin; resolves to null when it is not JSON. */
