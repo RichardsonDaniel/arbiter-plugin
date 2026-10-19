@@ -12,10 +12,10 @@ import { join } from 'node:path'
 export const OFF = /^(off|0|false|no)$/i.test(process.env.ARBITER_EDIT_GUARD ?? '')
 const LAYA = process.env.ARBITER_LAYA_URL ?? process.env.LAYA_URL ?? ''
 // Per-model clearing thresholds (product/packages/decide/src/index.ts); an unknown model never clears.
-const CLEAR_BY_MODEL = { 'arbiter-v4': { route_guarded: 0.97, policy_scope: 0.98 }, 'arbiter-v5': { route_guarded: 0.9, policy_scope: 0.93 }, 'arbiter-v6': { route_guarded: 0.9, policy_scope: 0.94 } }
+const CLEAR_BY_MODEL = { 'arbiter-v4': { route_guarded: 0.97, policy_scope: 0.98 }, 'arbiter-v5': { route_guarded: 0.9, policy_scope: 0.93 }, 'arbiter-v6': { route_guarded: 0.9, policy_scope: 0.94 }, 'arbiter-v7': { route_guarded: 0.96, policy_scope: 0.98 } }
 // Probability at or above which a model's before-guarded, after-open judgement asks (per model, measured with
 // corpus/decisions/eval_edit_guard.py). ARBITER_ASK_P overrides it for measurement.
-const ASK_BY_MODEL = { 'arbiter-v4': 0.8, 'arbiter-v5': 0.95, 'arbiter-v6': 0.8 }
+const ASK_BY_MODEL = { 'arbiter-v4': 0.8, 'arbiter-v5': 0.95, 'arbiter-v6': 0.8, 'arbiter-v7': 0.8 }
 const askP = (m) => Number(process.env.ARBITER_ASK_P ?? ASK_BY_MODEL[m?.model] ?? 0.8)
 const clear = (m, q) => CLEAR_BY_MODEL[m?.model]?.[q] ?? 1.01
 
