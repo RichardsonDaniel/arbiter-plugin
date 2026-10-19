@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Arbiter guard hook: blocks the shell commands that most often wipe an AI-built app's data, and pushes
 // that would publish a secret. Exit 2 blocks the call with a one-line reason; exit 0 lets it through.
+// The same file serves Claude Code (PreToolUse on Bash) and Codex (PreToolUse on Bash, which covers its shell and
+// exec_command tools): both send tool_input.command and both treat exit 2 with a reason on stderr as a block.
 // Set ARBITER_GUARD=off to disable.
 import { execFileSync } from 'node:child_process'
 
@@ -121,7 +123,8 @@ process.stdin.on('end', () => {
   let cwd = process.cwd()
   try {
     const parsed = JSON.parse(input)
-    command = String(parsed.tool_input?.command ?? '')
+    const raw = parsed.tool_input?.command ?? parsed.tool_input?.cmd ?? ''
+    command = Array.isArray(raw) ? raw.join(' ') : String(raw)
     if (typeof parsed.cwd === 'string' && parsed.cwd) cwd = parsed.cwd
   } catch {
     process.exit(0)
