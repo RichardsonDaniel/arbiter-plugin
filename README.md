@@ -21,3 +21,7 @@ Codex runs a plugin's hooks only after you have reviewed and trusted them: start
 The server address is `https://api.arbiterscan.com/mcp`; sign in with your email when the tool asks. Set `ARBITER_MCP_URL` to point the plugin at another server. More at https://arbiterscan.com.
 
 This repository is published from the Arbiter product repository and receives every change made there.
+
+## Licence
+
+The plugin files in this repository (the skill, command, hooks and Codex snippet) are under the MIT licence; see LICENSE. The Arbiter service they connect to is not part of this repository and is covered by the terms at https://arbiterscan.com/terms/.
